@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fondos de Pantalla</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main id="stage" class="stage">
+    <div id="layer-0" class="media-layer"></div>
+    <div id="layer-1" class="media-layer"></div>
+    <div id="empty-banner" class="empty-banner hidden">
+      <div class="empty-title" id="empty-title">Sin archivos disponibles</div>
+      <div class="empty-sub" id="empty-sub"></div>
+    </div>
+  </main>
+
+  <aside id="hud-wrap" class="hud-wrap">
+    <div id="hud-panel" class="hud-panel hidden" role="region" aria-label="Controles del fondo">
+      <div class="hud-row hud-top">
+        <div class="seg" role="group" aria-label="Modo de contenido">
+          <button type="button" class="seg-btn" id="btn-mode-sfw">SFW</button>
+          <button type="button" class="seg-btn" id="btn-mode-nsfw">NSFW</button>
+        </div>
+        <div class="seg" role="group" aria-label="Modo de pantallas">
+          <button type="button" class="seg-btn" id="btn-layout-dup">Duplicado</button>
+          <button type="button" class="seg-btn" id="btn-layout-ind">Indep.</button>
+        </div>
+        <button type="button" class="icon-btn" id="btn-pin-hud" title="Fijar panel visible">📌</button>
+      </div>
+
+      <div class="hud-timer-box">
+        <div class="timer-controls">
+          <span class="muted-label">Cambio cada</span>
+          <div class="stepper">
+            <button type="button" class="step-btn" id="btn-sec-minus" title="-1s">−</button>
+            <label class="sec-box">
+              <input type="number" id="input-seconds" min="1" max="86400" value="10" aria-label="Segundos">
+              <span class="sec-unit">s</span>
+            </label>
+            <button type="button" class="step-btn" id="btn-sec-plus" title="+1s">+</button>
+          </div>
+          <span class="countdown-text" id="countdown-text">10s</span>
+        </div>
+        <div class="progress-track">
+          <div class="progress-fill" id="progress-fill"></div>
+        </div>
+      </div>
+
+      <div class="main-tabs" role="tablist">
+        <button type="button" class="main-tab-btn active" id="main-tab-screens">🖥 Pantallas</button>
+        <button type="button" class="main-tab-btn" id="main-tab-history">🕘 Historial (0)</button>
+      </div>
+
+      <section id="tab-screen" class="tab-body">
+        <div class="screen-tabs" id="screen-tabs-bar"></div>
+
+        <div class="file-card">
+          <span class="badge" id="sc-type-badge">—</span>
+          <div class="file-meta">
+            <div class="file-name" id="sc-file-name">Sin archivo</div>
+            <div class="file-status" id="sc-status-text">—</div>
+          </div>
+          <button type="button" class="ghost-btn hidden" id="btn-resume-live" title="Salir del historial y volver a rotación aleatoria">↻ Aleatorio</button>
+        </div>
+
+        <div class="action-grid">
+          <button type="button" class="ctrl-btn" id="btn-prev" title="Anterior del historial">⏮ Anterior</button>
+          <button type="button" class="ctrl-btn" id="btn-pause">⏸ Pausar</button>
+          <button type="button" class="ctrl-btn" id="btn-next" title="Siguiente">⏭ Siguiente</button>
+        </div>
+
+        <div class="hud-row">
+          <button type="button" class="ctrl-btn wide" id="btn-mute">🔇 Audio: Silenciado</button>
+          <button type="button" class="ctrl-btn" id="btn-reveal-current" title="Abrir archivo en el Explorador">📂 Carpeta</button>
+        </div>
+
+        <div class="filter-row" id="filter-row">
+          <div class="seg full">
+            <button type="button" class="seg-btn" data-filter="mixto">Mixto</button>
+            <button type="button" class="seg-btn" data-filter="images">Fotos</button>
+            <button type="button" class="seg-btn" data-filter="videos">Videos</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="tab-history" class="tab-body hidden">
+        <div class="history-header">
+          <div class="history-target" id="history-target-wrap">
+            <span class="muted-label">Pantalla:</span>
+            <div class="screen-tabs compact" id="history-target-tabs"></div>
+          </div>
+          <button type="button" class="ghost-btn hidden" id="btn-history-resume">↻ Volver a aleatorio</button>
+        </div>
+        <div id="history-list" class="history-list"></div>
+      </section>
+    </div>
+
+    <button type="button" id="hud-pill" class="hud-pill" title="Controles de fondo">
+      <span class="pill-dot" id="pill-mode-dot"></span>
+      <span id="pill-label">SFW · P1 · 10s</span>
+    </button>
+  </aside>
+
+  <script src="/app.js"></script>
+</body>
+</html>

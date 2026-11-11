@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cargando Fondo...</title>
+  <style>
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      background: #0b0d12;
+      color: rgba(255, 255, 255, 0.55);
+      font-family: "Segoe UI", system-ui, sans-serif;
+      display: flex;
+      align-items: flex-end;
+      justify-content: flex-end;
+      overflow: hidden;
+    }
+    .status {
+      margin: 24px 20px 64px;
+      padding: 8px 14px;
+      border-radius: 999px;
+      background: rgba(20, 24, 34, 0.8);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div class="status" id="status">Conectando con servidor local (localhost:38421)...</div>
+  <script>
+    const TARGET = 'http://127.0.0.1:38421';
+    async function connect() {
+      try {
+        const res = await fetch(TARGET + '/health', { cache: 'no-store' });
+        if (res.ok) {
+          window.location.replace(TARGET + '/?wallpaper=1');
+          return;
+        }
+      } catch (_) {}
+      setTimeout(connect, 1500);
+    }
+    connect();
+  </script>
+</body>
+</html>

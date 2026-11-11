@@ -1,0 +1,11 @@
+{
+  "AppVersion": "1.0.0.0",
+  "Title": "Rotador Dinamico SFW/NSFW",
+  "Desc": "Wallpaper multipantalla sincronizado con fotos y videos en tiempos configurables.",
+  "Author": "Local",
+  "License": "MIT",
+  "Type": 1,
+  "FileName": "index.html",
+  "Arguments": null,
+  "IsAbsolutePath": false
+}

@@ -1,0 +1,12 @@
+{
+  "port": 38421,
+  "folders": {
+    "sfwImages": "C:\\Ruta\\A\\Tus\\Imagenes\\SFW",
+    "nsfwImages": "C:\\Ruta\\A\\Tus\\Imagenes\\NSFW",
+    "nsfwVideos": "C:\\Ruta\\A\\Tus\\Videos\\NSFW"
+  },
+  "imageExtensions": [".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif", ".jfif"],
+  "videoExtensions": [".mp4", ".webm", ".mov", ".m4v", ".mkv", ".avi"],
+  "maxHistory": 5,
+  "defaultIntervalSeconds": 10
+}
