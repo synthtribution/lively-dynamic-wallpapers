@@ -1031,7 +1031,15 @@ function createWallpaperApp(options = {}) {
 
       if (pathname === '/api/open-url') {
         const urlStr = String(body.url || '');
-        if (!/^https:\/\/www\.pixiv\.net\/en\/artworks\/\d+$/i.test(urlStr)) {
+        const allowedPatterns = [
+          /^https:\/\/www\.pixiv\.net\/en\/artworks\/\d+$/i,
+          /^https:\/\/danbooru\.donmai\.us\/posts\?tags=md5%3A[a-f0-9]{32}$/i,
+          /^https:\/\/danbooru\.donmai\.us\/posts\/\d+$/i,
+          /^https:\/\/rule34\.xxx\/index\.php\?page=post&s=view&id=\d+$/i,
+          /^https:\/\/pixai\.art\/artworks\/\d+$/i
+        ];
+        const isAllowed = allowedPatterns.some((pattern) => pattern.test(urlStr));
+        if (!isAllowed) {
           return sendJson(res, 400, { error: 'URL no permitida' });
         }
         if (process.platform === 'win32') {

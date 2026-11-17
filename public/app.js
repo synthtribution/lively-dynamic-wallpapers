@@ -75,10 +75,46 @@
     return res.json();
   }
 
-  function getPixivUrl(filename) {
+  function getArtworkSourceInfo(filename) {
     if (!filename) return null;
-    const m = filename.match(/^(\d{6,11})(?:-[a-f0-9]+)?_p\d+/i);
-    return m ? `https://www.pixiv.net/en/artworks/${m[1]}` : null;
+
+    // 1. Pixiv: 106348477_p0_master1200 or 147739826-b02b..._p0
+    const mPixiv = filename.match(/^(\d{6,11})(?:-[a-f0-9]+)?_p\d+/i);
+    if (mPixiv) {
+      const url = `https://www.pixiv.net/en/artworks/${mPixiv[1]}`;
+      return { platform: 'Pixiv', url };
+    }
+
+    // 2. PixAI: from-PixAI-1995494379278813578-0.png
+    const mPixai = filename.match(/^from-PixAI-(\d+)/i);
+    if (mPixai) {
+      const url = `https://pixai.art/artworks/${mPixai[1]}`;
+      return { platform: 'PixAI', url };
+    }
+
+    // 3. Rule34 with tags: futa-on-female-...-8606666.jpg
+    const mR34 = filename.match(/-(\d{5,9})\.[a-z0-9]+$/i);
+    if (mR34) {
+      const url = `https://rule34.xxx/index.php?page=post&s=view&id=${mR34[1]}`;
+      return { platform: 'Rule34', url };
+    }
+
+    // 4. Booru MD5: sample_05ee2ec4e2bc1cdae272397ad1ff85cf or pure 32-hex
+    const mMd5 = filename.match(/^(?:sample[_-])?([a-f0-9]{32})(?:\s*\(\d+\))?\.[a-z0-9]+$/i);
+    if (mMd5) {
+      const hash = mMd5[1].toLowerCase();
+      const url = `https://danbooru.donmai.us/posts?tags=md5%3A${hash}`;
+      return { platform: 'Danbooru (MD5)', url };
+    }
+
+    // 5. Danbooru pure ID: 1114621.png
+    const mDanId = filename.match(/^(\d{7,8})\.[a-z0-9]+$/i);
+    if (mDanId) {
+      const url = `https://danbooru.donmai.us/posts/${mDanId[1]}`;
+      return { platform: 'Danbooru', url };
+    }
+
+    return null;
   }
 
   function openExternalUrl(url) {
@@ -93,19 +129,19 @@
       container.title = '';
       return;
     }
-    const pixivUrl = getPixivUrl(filename);
-    if (pixivUrl) {
+    const sourceInfo = getArtworkSourceInfo(filename);
+    if (sourceInfo) {
       const a = document.createElement('a');
       a.className = 'pixiv-link';
       a.textContent = filename;
-      a.href = pixivUrl;
+      a.href = sourceInfo.url;
       a.target = '_blank';
       a.rel = 'noreferrer noopener';
-      a.title = `${filename}\nVer ilustración en Pixiv (${pixivUrl})`;
+      a.title = `${filename}\nVer en ${sourceInfo.platform} (${sourceInfo.url})`;
       a.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        openExternalUrl(pixivUrl);
+        openExternalUrl(sourceInfo.url);
       });
       container.appendChild(a);
     } else {
