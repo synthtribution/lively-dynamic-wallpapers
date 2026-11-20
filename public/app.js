@@ -48,6 +48,7 @@
   const scTypeBadge = document.getElementById('sc-type-badge');
   const scFileName = document.getElementById('sc-file-name');
   const scStatusText = document.getElementById('sc-status-text');
+  const scSourceBadge = document.getElementById('sc-source-badge');
   const btnPrev = document.getElementById('btn-prev');
   const btnPause = document.getElementById('btn-pause');
   const btnNext = document.getElementById('btn-next');
@@ -482,10 +483,27 @@
       scTypeBadge.textContent = item.type === 'video' ? 'VID' : 'IMG';
       scTypeBadge.classList.toggle('video', item.type === 'video');
       formatFileNameElement(scFileName, item.name);
+
+      const srcInfo = getArtworkSourceInfo(item.name);
+      if (srcInfo) {
+        scSourceBadge.textContent = srcInfo.platform.replace(' (MD5)', '');
+        scSourceBadge.className = 'source-badge';
+        const key = srcInfo.platform.toLowerCase();
+        if (key.includes('pixiv')) scSourceBadge.classList.add('pixiv');
+        else if (key.includes('danbooru')) scSourceBadge.classList.add('danbooru');
+        else if (key.includes('rule34')) scSourceBadge.classList.add('rule34');
+        else if (key.includes('pixai')) scSourceBadge.classList.add('pixai');
+        scSourceBadge.classList.remove('hidden');
+      } else {
+        scSourceBadge.textContent = '';
+        scSourceBadge.className = 'source-badge hidden';
+      }
     } else {
       scTypeBadge.textContent = '—';
       scTypeBadge.classList.remove('video');
       formatFileNameElement(scFileName, null, 'Sin archivo');
+      scSourceBadge.textContent = '';
+      scSourceBadge.className = 'source-badge hidden';
     }
 
     const parts = [];

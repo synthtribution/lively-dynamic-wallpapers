@@ -70,6 +70,7 @@ function makeFileId(filePath) {
 function createWallpaperApp(options = {}) {
   const configPath = options.configPath || process.env.FONDOS_CONFIG_PATH || path.join(ROOT_DIR, 'config.json');
   const statePath = options.statePath || process.env.FONDOS_STATE_PATH || path.join(ROOT_DIR, 'state.json');
+  const deckPath = options.deckPath || process.env.FONDOS_DECK_PATH || path.join(ROOT_DIR, 'deck.json');
   let config = loadConfig(configPath);
 
   const BOOT_ID = crypto.randomUUID();
@@ -239,6 +240,7 @@ function createWallpaperApp(options = {}) {
         duplicateFilter: ['mixto', 'images', 'videos'].includes(saved.duplicateFilter) ? saved.duplicateFilter : 'mixto',
         duplicateReplayQueue: [],
         duplicateReplayUid: null,
+        deckCursors: (saved.deckCursors && typeof saved.deckCursors === 'object') ? saved.deckCursors : {},
         screens
       };
     } catch (_) {
@@ -270,6 +272,7 @@ function createWallpaperApp(options = {}) {
       layoutMode: state.layoutMode,
       intervalSeconds: state.intervalSeconds,
       duplicateFilter: state.duplicateFilter,
+      deckCursors: state.deckCursors || {},
       screens: serializableScreens
     };
     try {
@@ -287,21 +290,135 @@ function createWallpaperApp(options = {}) {
     return [...catalog.nsfwImages, ...catalog.nsfwVideos];
   }
 
-  function pickRandomItem(mode, filter, avoidPath) {
+  function getDeckKey(mode, filter) {
+    return mode === 'sfw' ? 'sfw' : `nsfw_${filter || 'mixto'}`;
+  }
+
+  function loadDecksFile() {
+    try {
+      if (fs.existsSync(deckPath)) {
+        return JSON.parse(fs.readFileSync(deckPath, 'utf8')) || {};
+      }
+    } catch (_) {}
+    return {};
+  }
+
+  function saveDecksFile(decks) {
+    try {
+      fs.writeFileSync(deckPath, JSON.stringify(decks), 'utf8');
+    } catch (_) {}
+  }
+
+  // Active decks held in memory
+  let activeDecks = loadDecksFile();
+
+  function fisherYatesShuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const temp = arr[i];
+      arr[i] = arr[j];
+      arr[j] = temp;
+    }
+    return arr;
+  }
+
+  function getOrRebuildDeck(deckKey, pool) {
+    if (!state.deckCursors) state.deckCursors = {};
+    const existing = Array.isArray(activeDecks[deckKey]) ? activeDecks[deckKey] : null;
+    const poolIds = pool.map((item) => item.fileId);
+    const poolIdSet = new Set(poolIds);
+
+    // If deck doesn't exist or is empty
+    if (!existing || existing.length === 0) {
+      const shuffled = fisherYatesShuffle([...poolIds]);
+      activeDecks[deckKey] = shuffled;
+      state.deckCursors[deckKey] = 0;
+      saveDecksFile(activeDecks);
+      return shuffled;
+    }
+
+    // Check if files were added or removed in folder
+    const currentSet = new Set(existing);
+    const removedFound = existing.some((id) => !poolIdSet.has(id));
+    const added = poolIds.filter((id) => !currentSet.has(id));
+
+    if (removedFound || added.length > 0) {
+      let filtered = existing.filter((id) => poolIdSet.has(id));
+      if (added.length > 0) {
+        const shuffledAdded = fisherYatesShuffle([...added]);
+        filtered = filtered.concat(shuffledAdded);
+      }
+      activeDecks[deckKey] = filtered;
+      if ((state.deckCursors[deckKey] || 0) >= filtered.length) {
+        state.deckCursors[deckKey] = 0;
+      }
+      saveDecksFile(activeDecks);
+      return filtered;
+    }
+
+    return existing;
+  }
+
+  function pickNextFromDeck(mode, filter, avoidPath) {
     const pool = getPool(mode, filter);
     if (pool.length === 0) return null;
-    const candidates = pool.length > 1 && avoidPath ? pool.filter((f) => f.path !== avoidPath) : pool;
-    const chosen = candidates[Math.floor(Math.random() * candidates.length)];
+
+    const catalog = getMediaCatalog();
+    const deckKey = getDeckKey(mode, filter);
+    let deck = getOrRebuildDeck(deckKey, pool);
+
+    let cursor = state.deckCursors[deckKey] || 0;
+    if (cursor >= deck.length) {
+      // Completed full cycle! Reshuffle deck seamlessly
+      deck = fisherYatesShuffle(pool.map((item) => item.fileId));
+      activeDecks[deckKey] = deck;
+      cursor = 0;
+      saveDecksFile(activeDecks);
+    }
+
+    let chosenRecord = null;
+    let attempts = 0;
+    while (cursor < deck.length && attempts < deck.length) {
+      const candidateId = deck[cursor];
+      cursor++;
+      attempts++;
+      const rec = catalog.byId.get(candidateId);
+      if (rec && fs.existsSync(rec.path)) {
+        if (deck.length > 1 && avoidPath && rec.path === avoidPath) {
+          // If immediate repeat from other screen, put it next and pick following
+          continue;
+        }
+        chosenRecord = rec;
+        break;
+      }
+    }
+
+    // Fallback if loop ended
+    if (!chosenRecord) {
+      cursor = 0;
+      deck = fisherYatesShuffle(pool.map((item) => item.fileId));
+      activeDecks[deckKey] = deck;
+      saveDecksFile(activeDecks);
+      chosenRecord = pool[0];
+      cursor = 1;
+    }
+
+    state.deckCursors[deckKey] = cursor;
+
     return {
-      fileId: chosen.fileId,
-      name: chosen.name,
-      path: chosen.path,
-      url: chosen.url,
-      type: chosen.type,
+      fileId: chosenRecord.fileId,
+      name: chosenRecord.name,
+      path: chosenRecord.path,
+      url: chosenRecord.url,
+      type: chosenRecord.type,
       mode,
       seed: Math.random(),
       nonce: nonceSeq++
     };
+  }
+
+  function pickRandomItem(mode, filter, avoidPath) {
+    return pickNextFromDeck(mode, filter, avoidPath);
   }
 
   function makeItemFromHistory(entry) {
@@ -1088,6 +1205,7 @@ function createWallpaperApp(options = {}) {
     server,
     config,
     state,
+    saveState,
     getPublicState,
     start() {
       return new Promise((resolve, reject) => {
@@ -1113,6 +1231,15 @@ function createWallpaperApp(options = {}) {
 
 if (require.main === module) {
   const app = createWallpaperApp();
+  const onExit = () => {
+    try {
+      app.saveState?.();
+    } catch (_) {}
+    process.exit(0);
+  };
+  process.on('SIGINT', onExit);
+  process.on('SIGTERM', onExit);
+
   app.start().then((addr) => {
     console.log(`Servidor de fondos escuchando en http://127.0.0.1:${addr.port}`);
   });
