@@ -158,6 +158,8 @@ function createWallpaperApp(options = {}) {
       muted: true,
       currentItem: overrides.currentItem || null,
       history: Array.isArray(overrides.history) ? overrides.history : [],
+      collageHistory: [],
+      collageRedoStack: [],
       replayQueue: [],
       replayCurrentUid: null
     };
@@ -573,38 +575,63 @@ function createWallpaperApp(options = {}) {
       screen.activeItems = [];
     }
 
-    if (screen.activeItems.length === 0 && screen.currentItem) {
-      screen.activeItems.push(screen.currentItem);
+    if (screen.activeItems.length > targetCount) {
+      const sortedByNewest = [...screen.activeItems].sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0));
+      screen.activeItems = sortedByNewest.slice(0, targetCount).map((it, idx) => ({
+        ...it,
+        slotIndex: idx
+      }));
     }
 
-    if (screen.activeItems.length < targetCount && screen.history.length > 0) {
-      const activeUids = new Set(screen.activeItems.map((it) => it.historyUid || it.fileId));
-      for (let i = screen.history.length - 1; i >= 0 && screen.activeItems.length < targetCount; i--) {
-        const entry = screen.history[i];
-        if (!activeUids.has(entry.uid) && !activeUids.has(entry.fileId)) {
-          const item = makeItemFromHistory(entry);
-          if (item) {
-            screen.activeItems.unshift(item);
-            activeUids.add(entry.uid);
-          }
+    const now = Date.now();
+    for (let i = 0; i < screen.activeItems.length; i++) {
+      if (screen.activeItems[i]) {
+        screen.activeItems[i].slotIndex = i;
+        if (!screen.activeItems[i].addedAt) {
+          screen.activeItems[i].addedAt = now - (targetCount - i) * 10000;
         }
       }
     }
 
-    while (screen.activeItems.length < targetCount) {
-      const avoid = screen.activeItems[screen.activeItems.length - 1]?.path || null;
-      const picked = pickRandomItem(state.contentMode, screen.filter, avoid);
-      if (!picked) break;
-      const recorded = pushHistory(screen, picked);
-      screen.activeItems.unshift(recorded);
+    if (screen.activeItems.length === 0 && screen.currentItem) {
+      screen.activeItems.push({
+        ...screen.currentItem,
+        slotIndex: 0,
+        addedAt: now
+      });
     }
 
-    while (screen.activeItems.length > targetCount) {
-      screen.activeItems.shift();
+    while (screen.activeItems.length < targetCount) {
+      const nextSlot = screen.activeItems.length;
+      let candidate = null;
+      while (screen.replayQueue && screen.replayQueue.length > 0 && !candidate) {
+        const nextEntry = screen.replayQueue.shift();
+        const cand = makeItemFromHistory(nextEntry);
+        if (cand) {
+          screen.replayCurrentUid = nextEntry.uid;
+          candidate = cand;
+        }
+      }
+      if (!candidate) {
+        screen.replayCurrentUid = null;
+        const avoid = screen.activeItems[screen.activeItems.length - 1]?.path || null;
+        const picked = pickRandomItem(state.contentMode, screen.filter, avoid);
+        if (!picked) break;
+        candidate = pushHistory(screen, picked);
+      }
+      screen.activeItems.push({
+        ...candidate,
+        slotIndex: nextSlot,
+        addedAt: now - (targetCount - nextSlot) * 5000
+      });
     }
 
     if (screen.activeItems.length > 0) {
-      screen.currentItem = screen.activeItems[screen.activeItems.length - 1];
+      let newest = screen.activeItems[0];
+      for (const it of screen.activeItems) {
+        if ((it.addedAt || 0) > (newest.addedAt || 0)) newest = it;
+      }
+      screen.currentItem = newest;
     }
   }
 
@@ -655,8 +682,18 @@ function createWallpaperApp(options = {}) {
         sc.currentItem = { ...item, nonce: nonceSeq++ };
         if (sc.displayMode === 'collage') {
           ensureCollageItems(sc);
-          if (sc.activeItems.length >= sc.collageCount) sc.activeItems.shift();
-          sc.activeItems.push(sc.currentItem);
+          let oldestIdx = 0;
+          let oldestTime = Infinity;
+          for (let i = 0; i < sc.activeItems.length; i++) {
+            const t = sc.activeItems[i]?.addedAt ?? 0;
+            if (t < oldestTime) {
+              oldestTime = t;
+              oldestIdx = i;
+            }
+          }
+          const updated = { ...sc.currentItem, slotIndex: oldestIdx, addedAt: Date.now() };
+          sc.activeItems[oldestIdx] = updated;
+          sc.currentItem = updated;
         } else {
           sc.activeItems = [sc.currentItem];
         }
@@ -678,9 +715,39 @@ function createWallpaperApp(options = {}) {
         const saved = recordHistory ? pushHistory(sc, cloned) : cloned;
         sc.currentItem = saved;
         if (sc.displayMode === 'collage') {
+          if (sc.collageRedoStack && sc.collageRedoStack.length > 0) {
+            if (!sc.collageHistory) sc.collageHistory = [];
+            sc.collageHistory.push({
+              activeItems: sc.activeItems.map((it) => ({ ...it })),
+              currentItem: sc.currentItem ? { ...sc.currentItem } : null
+            });
+            const nextState = sc.collageRedoStack.pop();
+            sc.activeItems = nextState.activeItems;
+            sc.currentItem = nextState.currentItem;
+            continue;
+          }
+
           ensureCollageItems(sc);
-          if (sc.activeItems.length >= sc.collageCount) sc.activeItems.shift();
-          sc.activeItems.push(saved);
+          if (!sc.collageHistory) sc.collageHistory = [];
+          sc.collageHistory.push({
+            activeItems: sc.activeItems.map((it) => ({ ...it })),
+            currentItem: sc.currentItem ? { ...sc.currentItem } : null
+          });
+          if (sc.collageHistory.length > 30) sc.collageHistory.shift();
+          sc.collageRedoStack = [];
+
+          let oldestIdx = 0;
+          let oldestTime = Infinity;
+          for (let i = 0; i < sc.activeItems.length; i++) {
+            const t = sc.activeItems[i]?.addedAt ?? 0;
+            if (t < oldestTime) {
+              oldestTime = t;
+              oldestIdx = i;
+            }
+          }
+          const updated = { ...saved, slotIndex: oldestIdx, addedAt: Date.now() };
+          sc.activeItems[oldestIdx] = updated;
+          sc.currentItem = updated;
         } else {
           sc.activeItems = [saved];
         }
@@ -689,6 +756,18 @@ function createWallpaperApp(options = {}) {
   }
 
   function advanceSingleScreen(screen, { recordHistory = true } = {}) {
+    if (screen.displayMode === 'collage' && screen.collageRedoStack && screen.collageRedoStack.length > 0) {
+      if (!screen.collageHistory) screen.collageHistory = [];
+      screen.collageHistory.push({
+        activeItems: screen.activeItems.map((it) => ({ ...it })),
+        currentItem: screen.currentItem ? { ...screen.currentItem } : null
+      });
+      const nextState = screen.collageRedoStack.pop();
+      screen.activeItems = nextState.activeItems;
+      screen.currentItem = nextState.currentItem;
+      return;
+    }
+
     let item = null;
     while (screen.replayQueue.length > 0 && !item) {
       const nextEntry = screen.replayQueue.shift();
@@ -711,13 +790,29 @@ function createWallpaperApp(options = {}) {
     if (screen.displayMode === 'collage') {
       ensureCollageItems(screen);
       if (item) {
-        if (screen.activeItems.length >= screen.collageCount) {
-          screen.activeItems.shift();
+        if (!screen.collageHistory) screen.collageHistory = [];
+        screen.collageHistory.push({
+          activeItems: screen.activeItems.map((it) => ({ ...it })),
+          currentItem: screen.currentItem ? { ...screen.currentItem } : null
+        });
+        if (screen.collageHistory.length > 30) screen.collageHistory.shift();
+        screen.collageRedoStack = [];
+
+        let oldestIdx = 0;
+        let oldestTime = Infinity;
+        for (let i = 0; i < screen.activeItems.length; i++) {
+          const t = screen.activeItems[i]?.addedAt ?? 0;
+          if (t < oldestTime) {
+            oldestTime = t;
+            oldestIdx = i;
+          }
         }
-        screen.activeItems.push(item);
+        const updated = { ...item, slotIndex: oldestIdx, addedAt: Date.now() };
+        screen.activeItems[oldestIdx] = updated;
+        screen.currentItem = updated;
       }
     } else {
-      screen.activeItems = item ? [item] : [];
+      screen.activeItems = item ? [{ ...item, slotIndex: 0, addedAt: Date.now() }] : [];
     }
   }
 
@@ -738,7 +833,47 @@ function createWallpaperApp(options = {}) {
 
   function stepPrevious(screenId) {
     const screen = state.screens[screenId] || state.screens.P1;
-    if (!screen || screen.history.length === 0) return;
+    if (!screen) return;
+
+    if (state.layoutMode === 'duplicado') {
+      let anyCollageReverted = false;
+      for (const sc of Object.values(state.screens)) {
+        if (sc.displayMode === 'collage' && sc.collageHistory && sc.collageHistory.length > 0) {
+          if (!sc.collageRedoStack) sc.collageRedoStack = [];
+          sc.collageRedoStack.push({
+            activeItems: sc.activeItems.map((it) => ({ ...it })),
+            currentItem: sc.currentItem ? { ...sc.currentItem } : null
+          });
+          const prevState = sc.collageHistory.pop();
+          sc.activeItems = prevState.activeItems;
+          sc.currentItem = prevState.currentItem;
+          anyCollageReverted = true;
+        }
+      }
+      if (anyCollageReverted) {
+        remainingSeconds = state.intervalSeconds;
+        saveState();
+        broadcastState();
+        return;
+      }
+    } else {
+      if (screen.displayMode === 'collage' && screen.collageHistory && screen.collageHistory.length > 0) {
+        if (!screen.collageRedoStack) screen.collageRedoStack = [];
+        screen.collageRedoStack.push({
+          activeItems: screen.activeItems.map((it) => ({ ...it })),
+          currentItem: screen.currentItem ? { ...screen.currentItem } : null
+        });
+        const prevState = screen.collageHistory.pop();
+        screen.activeItems = prevState.activeItems;
+        screen.currentItem = prevState.currentItem;
+        remainingSeconds = state.intervalSeconds;
+        saveState();
+        broadcastState();
+        return;
+      }
+    }
+
+    if (screen.history.length === 0) return;
 
     const activeUid = state.layoutMode === 'duplicado' ? state.duplicateReplayUid : screen.replayCurrentUid;
     let foundIdx = activeUid ? screen.history.findIndex((h) => h.uid === activeUid) : -1;
@@ -794,9 +929,26 @@ function createWallpaperApp(options = {}) {
         each.replayCurrentUid = entry.uid;
         each.currentItem = { ...item, nonce: nonceSeq++ };
         if (each.displayMode === 'collage') {
-          const count = each.collageCount || 4;
-          const start = Math.max(0, idx - count + 1);
-          each.activeItems = owner.history.slice(start, idx + 1).map(makeItemFromHistory).filter(Boolean);
+          ensureCollageItems(each);
+          if (!each.collageHistory) each.collageHistory = [];
+          each.collageHistory.push({
+            activeItems: each.activeItems.map((it) => ({ ...it })),
+            currentItem: each.currentItem ? { ...each.currentItem } : null
+          });
+          if (each.collageHistory.length > 30) each.collageHistory.shift();
+          each.collageRedoStack = [];
+
+          let targetSlot = 0;
+          let oldestTime = Infinity;
+          for (let s = 0; s < each.activeItems.length; s++) {
+            const t = each.activeItems[s]?.addedAt ?? 0;
+            if (t < oldestTime) {
+              oldestTime = t;
+              targetSlot = s;
+            }
+          }
+          each.activeItems[targetSlot] = { ...item, slotIndex: targetSlot, addedAt: Date.now() };
+          each.currentItem = each.activeItems[targetSlot];
         } else {
           each.activeItems = [each.currentItem];
         }
@@ -806,9 +958,26 @@ function createWallpaperApp(options = {}) {
       sc.replayCurrentUid = entry.uid;
       sc.currentItem = item;
       if (sc.displayMode === 'collage') {
-        const count = sc.collageCount || 4;
-        const start = Math.max(0, idx - count + 1);
-        sc.activeItems = owner.history.slice(start, idx + 1).map(makeItemFromHistory).filter(Boolean);
+        ensureCollageItems(sc);
+        if (!sc.collageHistory) sc.collageHistory = [];
+        sc.collageHistory.push({
+          activeItems: sc.activeItems.map((it) => ({ ...it })),
+          currentItem: sc.currentItem ? { ...sc.currentItem } : null
+        });
+        if (sc.collageHistory.length > 30) sc.collageHistory.shift();
+        sc.collageRedoStack = [];
+
+        let targetSlot = 0;
+        let oldestTime = Infinity;
+        for (let s = 0; s < sc.activeItems.length; s++) {
+          const t = sc.activeItems[s]?.addedAt ?? 0;
+          if (t < oldestTime) {
+            oldestTime = t;
+            targetSlot = s;
+          }
+        }
+        sc.activeItems[targetSlot] = { ...item, slotIndex: targetSlot, addedAt: Date.now() };
+        sc.currentItem = sc.activeItems[targetSlot];
       } else {
         sc.activeItems = [item];
       }
@@ -1198,8 +1367,6 @@ function createWallpaperApp(options = {}) {
           sc.displayMode = body.displayMode;
           if (sc.displayMode === 'collage') {
             ensureCollageItems(sc);
-          } else {
-            sc.activeItems = sc.currentItem ? [sc.currentItem] : [];
           }
         }
         if ([2, 3, 4].includes(Number(body.collageCount))) {

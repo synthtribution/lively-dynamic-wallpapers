@@ -274,14 +274,17 @@
     }
     emptyBanner.classList.add('hidden');
 
-    const newest = items[items.length - 1] || screenObj.currentItem;
-    if (newest && collageGlobalBg) {
-      collageGlobalBg.style.backgroundImage = `url("${newest.url}")`;
-    }
-
     const count = [2, 3, 4].includes(Number(screenObj.collageCount))
       ? Number(screenObj.collageCount)
       : Math.min(4, Math.max(2, items.length));
+
+    let newest = items[0];
+    for (const it of items) {
+      if ((it.addedAt || 0) > (newest?.addedAt || 0)) newest = it;
+    }
+    if (newest && collageGlobalBg) {
+      collageGlobalBg.style.backgroundImage = `url("${newest.url}")`;
+    }
 
     collageGrid.className = `collage-grid count-${count}`;
 
@@ -291,62 +294,82 @@
       last.remove();
     }
     while (collageGrid.children.length < count) {
-      const cell = document.createElement('div');
-      cell.className = 'collage-cell';
-      const cellBg = document.createElement('div');
-      cellBg.className = 'collage-cell-bg';
-      cell.appendChild(cellBg);
-      collageGrid.appendChild(cell);
+      const slotIdx = collageGrid.children.length;
+      const slot = document.createElement('div');
+      slot.className = `collage-slot collage-slot-${slotIdx}`;
+      slot.dataset.slot = String(slotIdx);
+
+      const layerA = document.createElement('div');
+      layerA.className = 'collage-slot-layer layer-a';
+
+      const layerB = document.createElement('div');
+      layerB.className = 'collage-slot-layer layer-b';
+
+      slot.append(layerA, layerB);
+      collageGrid.appendChild(slot);
     }
 
     for (let i = 0; i < count; i++) {
-      const it = items[i] || items[items.length - 1];
-      const cell = collageGrid.children[i];
-      if (!it || !cell) continue;
+      const slot = collageGrid.children[i];
+      if (!slot) continue;
 
-      const currentUid = cell.dataset.uid;
-      const currentUrl = cell.dataset.url;
+      const it = items.find((x) => x.slotIndex === i) || items[i] || newest;
+      if (!it) continue;
+
       const itemUid = it.historyUid || it.fileId;
+      const currentUid = slot.dataset.uid;
+      const currentUrl = slot.dataset.url;
 
       if (currentUid !== itemUid || currentUrl !== it.url) {
-        cell.dataset.uid = itemUid;
-        cell.dataset.url = it.url;
+        slot.dataset.uid = itemUid;
+        slot.dataset.url = it.url;
 
-        const cellBg = cell.querySelector('.collage-cell-bg');
-        if (cellBg) {
-          cellBg.style.backgroundImage = `url("${it.url}")`;
-        }
+        const layerA = slot.querySelector('.layer-a');
+        const layerB = slot.querySelector('.layer-b');
+        const isAActive = layerA.classList.contains('active');
+        const incomingLayer = isAActive ? layerB : layerA;
+        const outgoingLayer = isAActive ? layerA : layerB;
 
-        const oldMedia = cell.querySelector('.collage-cell-media');
-        if (oldMedia) {
-          releaseMediaIn(oldMedia);
-          oldMedia.remove();
-        }
+        releaseMediaIn(incomingLayer);
+        incomingLayer.innerHTML = '';
+
+        const activate = () => {
+          if (slot.dataset.uid !== itemUid) return;
+          incomingLayer.classList.add('active');
+          outgoingLayer.classList.remove('active');
+          setTimeout(() => {
+            if (!outgoingLayer.classList.contains('active')) {
+              releaseMediaIn(outgoingLayer);
+              outgoingLayer.innerHTML = '';
+            }
+          }, 800);
+        };
 
         if (it.type === 'video') {
           const vid = document.createElement('video');
-          vid.className = 'collage-cell-media';
+          vid.className = 'collage-media';
           vid.src = it.url;
           vid.autoplay = true;
           vid.loop = true;
           vid.muted = Boolean(screenObj.muted);
           vid.playsInline = true;
-          cell.appendChild(vid);
+          vid.oncanplay = activate;
+          incomingLayer.appendChild(vid);
         } else {
           const img = document.createElement('img');
-          img.className = 'collage-cell-media';
+          img.className = 'collage-media';
           img.alt = it.name || '';
           img.src = it.url;
-          img.loading = 'eager';
-          cell.appendChild(img);
+          if (typeof img.decode === 'function') {
+            img.decode().then(activate).catch(activate);
+          } else {
+            img.onload = activate;
+            img.onerror = activate;
+          }
+          incomingLayer.appendChild(img);
         }
-
-        cell.style.opacity = '0';
-        requestAnimationFrame(() => {
-          cell.style.opacity = '1';
-        });
       } else {
-        const vid = cell.querySelector('video.collage-cell-media');
+        const vid = slot.querySelector('.collage-slot-layer.active video');
         if (vid) {
           vid.muted = Boolean(screenObj.muted);
         }
@@ -374,6 +397,7 @@
 
     const isCollage = screenObj?.displayMode === 'collage';
     if (isCollage) {
+      currentRenderedNonce = null;
       if (collageStage) collageStage.classList.remove('hidden');
       layers.forEach((l) => {
         l.classList.remove('active');
@@ -615,15 +639,16 @@
       const activeItems = Array.isArray(target.activeItems) && target.activeItems.length > 0
         ? target.activeItems
         : (target.currentItem ? [target.currentItem] : []);
-      const reversed = [...activeItems].reverse();
+      const sorted = [...activeItems].sort((a, b) => ((b.addedAt || 0) - (a.addedAt || 0)));
 
-      reversed.forEach((it, idx) => {
+      sorted.forEach((it, idx) => {
         const card = document.createElement('div');
         card.className = 'collage-card' + (idx === 0 ? ' is-newest' : '');
 
         const rankBadge = document.createElement('span');
         rankBadge.className = 'collage-rank-badge' + (idx === 0 ? ' newest' : '');
-        rankBadge.textContent = idx === 0 ? '★ Reciente' : (idx === reversed.length - 1 && reversed.length > 2 ? 'Antigua' : `#${idx + 1}`);
+        const slotNum = Number.isInteger(it.slotIndex) ? ` (C${it.slotIndex + 1})` : '';
+        rankBadge.textContent = idx === 0 ? `★ Reciente${slotNum}` : `#${idx + 1}${slotNum}`;
 
         const typeBadge = document.createElement('span');
         typeBadge.className = 'badge' + (it.type === 'video' ? ' video' : '');
@@ -773,8 +798,8 @@
     const activeCollageItems = Array.isArray(targetScreen?.activeItems) ? targetScreen.activeItems : [];
     const collageRankMap = new Map();
     if (isCollage) {
-      const rev = [...activeCollageItems].reverse();
-      rev.forEach((it, idx) => {
+      const sorted = [...activeCollageItems].sort((a, b) => ((b.addedAt || 0) - (a.addedAt || 0)));
+      sorted.forEach((it, idx) => {
         if (it.historyUid) collageRankMap.set(it.historyUid, idx);
         if (it.fileId) collageRankMap.set(it.fileId, idx);
       });
