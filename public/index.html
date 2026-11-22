@@ -10,6 +10,10 @@
   <main id="stage" class="stage">
     <div id="layer-0" class="media-layer"></div>
     <div id="layer-1" class="media-layer"></div>
+    <div id="collage-stage" class="collage-stage hidden">
+      <div id="collage-global-bg" class="collage-global-bg"></div>
+      <div id="collage-grid" class="collage-grid"></div>
+    </div>
     <div id="empty-banner" class="empty-banner hidden">
       <div class="empty-title" id="empty-title">Sin archivos disponibles</div>
       <div class="empty-sub" id="empty-sub"></div>
@@ -56,17 +60,33 @@
       <section id="tab-screen" class="tab-body">
         <div class="screen-tabs" id="screen-tabs-bar"></div>
 
-        <div class="file-card">
-          <span class="badge" id="sc-type-badge">—</span>
-          <div class="file-meta">
-            <div class="file-name" id="sc-file-name">Sin archivo</div>
-            <div class="file-status">
-              <span id="sc-status-text">—</span>
-              <span class="source-badge hidden" id="sc-source-badge"></span>
-            </div>
+        <div class="hud-row hud-view-row">
+          <div class="seg" role="group" aria-label="Modo de visualización">
+            <button type="button" class="seg-btn active" id="btn-disp-single">1 Sola</button>
+            <button type="button" class="seg-btn" id="btn-disp-collage">Collage</button>
           </div>
-          <button type="button" class="ghost-btn hidden" id="btn-resume-live" title="Salir del historial y volver a rotación aleatoria">↻ Aleatorio</button>
+          <div class="seg hidden" id="collage-count-seg" role="group" aria-label="Cantidad de imágenes">
+            <button type="button" class="seg-btn" data-count="2">2</button>
+            <button type="button" class="seg-btn" data-count="3">3</button>
+            <button type="button" class="seg-btn active" data-count="4">4</button>
+          </div>
         </div>
+
+        <div id="single-card-wrap">
+          <div class="file-card">
+            <span class="badge" id="sc-type-badge">—</span>
+            <div class="file-meta">
+              <div class="file-name" id="sc-file-name">Sin archivo</div>
+              <div class="file-status">
+                <span id="sc-status-text">—</span>
+                <span class="source-badge hidden" id="sc-source-badge"></span>
+              </div>
+            </div>
+            <button type="button" class="ghost-btn hidden" id="btn-resume-live" title="Salir del historial y volver a rotación aleatoria">↻ Aleatorio</button>
+          </div>
+        </div>
+
+        <div id="collage-cards-list" class="collage-cards-list hidden"></div>
 
         <div class="action-grid">
           <button type="button" class="ctrl-btn" id="btn-prev" title="Anterior del historial">⏮ Anterior</button>

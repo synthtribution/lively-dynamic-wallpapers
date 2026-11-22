@@ -152,6 +152,9 @@ function createWallpaperApp(options = {}) {
       height: overrides.height ?? 0,
       paused: Boolean(overrides.paused),
       filter: ['mixto', 'images', 'videos'].includes(overrides.filter) ? overrides.filter : 'mixto',
+      displayMode: ['single', 'collage'].includes(overrides.displayMode) ? overrides.displayMode : 'single',
+      collageCount: [2, 3, 4].includes(Number(overrides.collageCount)) ? Number(overrides.collageCount) : 4,
+      activeItems: Array.isArray(overrides.activeItems) ? overrides.activeItems : [],
       muted: true,
       currentItem: overrides.currentItem || null,
       history: Array.isArray(overrides.history) ? overrides.history : [],
@@ -262,6 +265,8 @@ function createWallpaperApp(options = {}) {
         height: sc.height,
         paused: sc.paused,
         filter: sc.filter,
+        displayMode: sc.displayMode || 'single',
+        collageCount: sc.collageCount || 4,
         currentFileId: sc.currentItem?.fileId || null,
         currentMode: sc.currentItem?.mode || null,
         history: sc.history
@@ -560,18 +565,72 @@ function createWallpaperApp(options = {}) {
     return newId;
   }
 
+  function ensureCollageItems(screen) {
+    if (!screen) return;
+    const targetCount = [2, 3, 4].includes(Number(screen.collageCount)) ? Number(screen.collageCount) : 4;
+    screen.collageCount = targetCount;
+    if (!Array.isArray(screen.activeItems)) {
+      screen.activeItems = [];
+    }
+
+    if (screen.activeItems.length === 0 && screen.currentItem) {
+      screen.activeItems.push(screen.currentItem);
+    }
+
+    if (screen.activeItems.length < targetCount && screen.history.length > 0) {
+      const activeUids = new Set(screen.activeItems.map((it) => it.historyUid || it.fileId));
+      for (let i = screen.history.length - 1; i >= 0 && screen.activeItems.length < targetCount; i--) {
+        const entry = screen.history[i];
+        if (!activeUids.has(entry.uid) && !activeUids.has(entry.fileId)) {
+          const item = makeItemFromHistory(entry);
+          if (item) {
+            screen.activeItems.unshift(item);
+            activeUids.add(entry.uid);
+          }
+        }
+      }
+    }
+
+    while (screen.activeItems.length < targetCount) {
+      const avoid = screen.activeItems[screen.activeItems.length - 1]?.path || null;
+      const picked = pickRandomItem(state.contentMode, screen.filter, avoid);
+      if (!picked) break;
+      const recorded = pushHistory(screen, picked);
+      screen.activeItems.unshift(recorded);
+    }
+
+    while (screen.activeItems.length > targetCount) {
+      screen.activeItems.shift();
+    }
+
+    if (screen.activeItems.length > 0) {
+      screen.currentItem = screen.activeItems[screen.activeItems.length - 1];
+    }
+  }
+
   function ensureInitialMediaForScreen(screen) {
+    if (screen.currentItem && (!screen.activeItems || screen.activeItems.length === 0)) {
+      screen.activeItems = [screen.currentItem];
+    }
+    if (screen.displayMode === 'collage') {
+      ensureCollageItems(screen);
+    }
     if (screen.currentItem) return;
     if (state.layoutMode === 'duplicado') {
       const ref = Object.values(state.screens).find((s) => s.currentItem);
       if (ref) {
         screen.currentItem = { ...ref.currentItem, nonce: nonceSeq++ };
+        screen.activeItems = ref.activeItems ? ref.activeItems.map((it) => ({ ...it })) : [screen.currentItem];
         return;
       }
     }
     const item = pickRandomItem(state.contentMode, screen.filter, null);
     if (item) {
       screen.currentItem = pushHistory(screen, item);
+      screen.activeItems = [screen.currentItem];
+      if (screen.displayMode === 'collage') {
+        ensureCollageItems(screen);
+      }
     }
   }
 
@@ -594,6 +653,13 @@ function createWallpaperApp(options = {}) {
         sc.replayCurrentUid = state.duplicateReplayUid;
         sc.replayQueue = state.duplicateReplayQueue.map((h) => ({ ...h }));
         sc.currentItem = { ...item, nonce: nonceSeq++ };
+        if (sc.displayMode === 'collage') {
+          ensureCollageItems(sc);
+          if (sc.activeItems.length >= sc.collageCount) sc.activeItems.shift();
+          sc.activeItems.push(sc.currentItem);
+        } else {
+          sc.activeItems = [sc.currentItem];
+        }
       }
       return;
     }
@@ -606,9 +672,18 @@ function createWallpaperApp(options = {}) {
       sc.replayQueue = [];
       if (!baseItem) {
         sc.currentItem = null;
+        sc.activeItems = [];
       } else {
         const cloned = { ...baseItem, nonce: nonceSeq++ };
-        sc.currentItem = recordHistory ? pushHistory(sc, cloned) : cloned;
+        const saved = recordHistory ? pushHistory(sc, cloned) : cloned;
+        sc.currentItem = saved;
+        if (sc.displayMode === 'collage') {
+          ensureCollageItems(sc);
+          if (sc.activeItems.length >= sc.collageCount) sc.activeItems.shift();
+          sc.activeItems.push(saved);
+        } else {
+          sc.activeItems = [saved];
+        }
       }
     }
   }
@@ -626,11 +701,24 @@ function createWallpaperApp(options = {}) {
 
     if (!item) {
       screen.replayCurrentUid = null;
-      const picked = pickRandomItem(state.contentMode, screen.filter, screen.currentItem?.path || null);
+      const avoid = screen.currentItem?.path || null;
+      const picked = pickRandomItem(state.contentMode, screen.filter, avoid);
       item = picked && recordHistory ? pushHistory(screen, picked) : picked;
     }
 
     screen.currentItem = item;
+
+    if (screen.displayMode === 'collage') {
+      ensureCollageItems(screen);
+      if (item) {
+        if (screen.activeItems.length >= screen.collageCount) {
+          screen.activeItems.shift();
+        }
+        screen.activeItems.push(item);
+      }
+    } else {
+      screen.activeItems = item ? [item] : [];
+    }
   }
 
   function advanceTick() {
@@ -705,11 +793,25 @@ function createWallpaperApp(options = {}) {
         each.replayQueue = remaining.map((h) => ({ ...h }));
         each.replayCurrentUid = entry.uid;
         each.currentItem = { ...item, nonce: nonceSeq++ };
+        if (each.displayMode === 'collage') {
+          const count = each.collageCount || 4;
+          const start = Math.max(0, idx - count + 1);
+          each.activeItems = owner.history.slice(start, idx + 1).map(makeItemFromHistory).filter(Boolean);
+        } else {
+          each.activeItems = [each.currentItem];
+        }
       }
     } else {
       sc.replayQueue = remaining;
       sc.replayCurrentUid = entry.uid;
       sc.currentItem = item;
+      if (sc.displayMode === 'collage') {
+        const count = sc.collageCount || 4;
+        const start = Math.max(0, idx - count + 1);
+        sc.activeItems = owner.history.slice(start, idx + 1).map(makeItemFromHistory).filter(Boolean);
+      } else {
+        sc.activeItems = [item];
+      }
     }
     remainingSeconds = state.intervalSeconds;
     return true;
@@ -744,6 +846,11 @@ function createWallpaperApp(options = {}) {
         online: Boolean(online[id]),
         paused: sc.paused,
         filter: sc.filter,
+        displayMode: sc.displayMode || 'single',
+        collageCount: sc.collageCount || 4,
+        activeItems: Array.isArray(sc.activeItems) && sc.activeItems.length > 0
+          ? sc.activeItems
+          : (sc.currentItem ? [sc.currentItem] : []),
         muted: sc.muted,
         currentItem: sc.currentItem,
         replayCurrentUid: sc.replayCurrentUid,
@@ -1085,6 +1192,20 @@ function createWallpaperApp(options = {}) {
           sc.filter = body.filter;
           if (state.layoutMode === 'duplicado') {
             state.duplicateFilter = body.filter;
+          }
+        }
+        if (body.displayMode === 'single' || body.displayMode === 'collage') {
+          sc.displayMode = body.displayMode;
+          if (sc.displayMode === 'collage') {
+            ensureCollageItems(sc);
+          } else {
+            sc.activeItems = sc.currentItem ? [sc.currentItem] : [];
+          }
+        }
+        if ([2, 3, 4].includes(Number(body.collageCount))) {
+          sc.collageCount = Number(body.collageCount);
+          if (sc.displayMode === 'collage') {
+            ensureCollageItems(sc);
           }
         }
 

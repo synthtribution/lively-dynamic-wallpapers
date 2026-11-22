@@ -66,6 +66,15 @@
   const emptyTitle = document.getElementById('empty-title');
   const emptySub = document.getElementById('empty-sub');
 
+  const collageStage = document.getElementById('collage-stage');
+  const collageGlobalBg = document.getElementById('collage-global-bg');
+  const collageGrid = document.getElementById('collage-grid');
+  const btnDispSingle = document.getElementById('btn-disp-single');
+  const btnDispCollage = document.getElementById('btn-disp-collage');
+  const collageCountSeg = document.getElementById('collage-count-seg');
+  const singleCardWrap = document.getElementById('single-card-wrap');
+  const collageCardsList = document.getElementById('collage-cards-list');
+
   async function api(url, body) {
     const res = await fetch(url, {
       method: 'POST',
@@ -253,6 +262,98 @@
     api('/api/action', { action: 'report-error', screenId: myScreenId, fileId });
   }
 
+  function renderCollage(screenObj) {
+    if (!collageStage || !collageGrid) return;
+    const items = Array.isArray(screenObj.activeItems) && screenObj.activeItems.length > 0
+      ? screenObj.activeItems
+      : (screenObj.currentItem ? [screenObj.currentItem] : []);
+
+    if (items.length === 0) {
+      emptyBanner.classList.remove('hidden');
+      return;
+    }
+    emptyBanner.classList.add('hidden');
+
+    const newest = items[items.length - 1] || screenObj.currentItem;
+    if (newest && collageGlobalBg) {
+      collageGlobalBg.style.backgroundImage = `url("${newest.url}")`;
+    }
+
+    const count = [2, 3, 4].includes(Number(screenObj.collageCount))
+      ? Number(screenObj.collageCount)
+      : Math.min(4, Math.max(2, items.length));
+
+    collageGrid.className = `collage-grid count-${count}`;
+
+    while (collageGrid.children.length > count) {
+      const last = collageGrid.lastElementChild;
+      releaseMediaIn(last);
+      last.remove();
+    }
+    while (collageGrid.children.length < count) {
+      const cell = document.createElement('div');
+      cell.className = 'collage-cell';
+      const cellBg = document.createElement('div');
+      cellBg.className = 'collage-cell-bg';
+      cell.appendChild(cellBg);
+      collageGrid.appendChild(cell);
+    }
+
+    for (let i = 0; i < count; i++) {
+      const it = items[i] || items[items.length - 1];
+      const cell = collageGrid.children[i];
+      if (!it || !cell) continue;
+
+      const currentUid = cell.dataset.uid;
+      const currentUrl = cell.dataset.url;
+      const itemUid = it.historyUid || it.fileId;
+
+      if (currentUid !== itemUid || currentUrl !== it.url) {
+        cell.dataset.uid = itemUid;
+        cell.dataset.url = it.url;
+
+        const cellBg = cell.querySelector('.collage-cell-bg');
+        if (cellBg) {
+          cellBg.style.backgroundImage = `url("${it.url}")`;
+        }
+
+        const oldMedia = cell.querySelector('.collage-cell-media');
+        if (oldMedia) {
+          releaseMediaIn(oldMedia);
+          oldMedia.remove();
+        }
+
+        if (it.type === 'video') {
+          const vid = document.createElement('video');
+          vid.className = 'collage-cell-media';
+          vid.src = it.url;
+          vid.autoplay = true;
+          vid.loop = true;
+          vid.muted = Boolean(screenObj.muted);
+          vid.playsInline = true;
+          cell.appendChild(vid);
+        } else {
+          const img = document.createElement('img');
+          img.className = 'collage-cell-media';
+          img.alt = it.name || '';
+          img.src = it.url;
+          img.loading = 'eager';
+          cell.appendChild(img);
+        }
+
+        cell.style.opacity = '0';
+        requestAnimationFrame(() => {
+          cell.style.opacity = '1';
+        });
+      } else {
+        const vid = cell.querySelector('video.collage-cell-media');
+        if (vid) {
+          vid.muted = Boolean(screenObj.muted);
+        }
+      }
+    }
+  }
+
   function renderMedia(item, screenObj) {
     if (!item) {
       currentRenderedNonce = null;
@@ -262,6 +363,7 @@
         l.classList.remove('active');
         cleanupLayer(l);
       });
+      if (collageStage) collageStage.classList.add('hidden');
       emptyBanner.classList.remove('hidden');
       emptyTitle.textContent = appState?.contentMode === 'sfw'
         ? 'No hay imágenes en la carpeta SFW'
@@ -269,6 +371,21 @@
       emptySub.textContent = 'Revisa config.json o agrega imágenes/videos compatibles en la carpeta correspondiente.';
       return;
     }
+
+    const isCollage = screenObj?.displayMode === 'collage';
+    if (isCollage) {
+      if (collageStage) collageStage.classList.remove('hidden');
+      layers.forEach((l) => {
+        l.classList.remove('active');
+        cleanupLayer(l);
+      });
+      stopVideoLoop();
+      activeVideoEl = null;
+      renderCollage(screenObj);
+      return;
+    }
+
+    if (collageStage) collageStage.classList.add('hidden');
 
     emptyBanner.classList.add('hidden');
 
@@ -479,6 +596,79 @@
     const target = appState.screens[selectedScreenTab] || myScreen;
     const item = target.currentItem;
 
+    const isCollage = target.displayMode === 'collage';
+    if (btnDispSingle) btnDispSingle.classList.toggle('active', !isCollage);
+    if (btnDispCollage) btnDispCollage.classList.toggle('active', isCollage);
+    if (collageCountSeg) {
+      collageCountSeg.classList.toggle('hidden', !isCollage);
+      const activeCount = target.collageCount || 4;
+      for (const cbtn of collageCountSeg.querySelectorAll('[data-count]')) {
+        cbtn.classList.toggle('active', Number(cbtn.dataset.count) === activeCount);
+      }
+    }
+
+    if (singleCardWrap) singleCardWrap.classList.toggle('hidden', isCollage);
+    if (collageCardsList) collageCardsList.classList.toggle('hidden', !isCollage);
+
+    if (isCollage && collageCardsList) {
+      collageCardsList.innerHTML = '';
+      const activeItems = Array.isArray(target.activeItems) && target.activeItems.length > 0
+        ? target.activeItems
+        : (target.currentItem ? [target.currentItem] : []);
+      const reversed = [...activeItems].reverse();
+
+      reversed.forEach((it, idx) => {
+        const card = document.createElement('div');
+        card.className = 'collage-card' + (idx === 0 ? ' is-newest' : '');
+
+        const rankBadge = document.createElement('span');
+        rankBadge.className = 'collage-rank-badge' + (idx === 0 ? ' newest' : '');
+        rankBadge.textContent = idx === 0 ? '★ Reciente' : (idx === reversed.length - 1 && reversed.length > 2 ? 'Antigua' : `#${idx + 1}`);
+
+        const typeBadge = document.createElement('span');
+        typeBadge.className = 'badge' + (it.type === 'video' ? ' video' : '');
+        typeBadge.textContent = it.type === 'video' ? 'VID' : 'IMG';
+
+        const meta = document.createElement('div');
+        meta.className = 'file-meta';
+
+        const nameEl = document.createElement('div');
+        nameEl.className = 'file-name';
+        formatFileNameElement(nameEl, it.name);
+
+        const statusEl = document.createElement('div');
+        statusEl.className = 'file-status';
+
+        const srcInfo = getArtworkSourceInfo(it.name);
+        if (srcInfo) {
+          const sBadge = document.createElement('span');
+          sBadge.textContent = srcInfo.platform.replace(' (MD5)', '');
+          sBadge.className = 'source-badge';
+          const k = srcInfo.platform.toLowerCase();
+          if (k.includes('pixiv')) sBadge.classList.add('pixiv');
+          else if (k.includes('danbooru')) sBadge.classList.add('danbooru');
+          else if (k.includes('rule34')) sBadge.classList.add('rule34');
+          else if (k.includes('pixai')) sBadge.classList.add('pixai');
+          statusEl.appendChild(sBadge);
+        }
+
+        meta.append(nameEl, statusEl);
+
+        const btnFolder = document.createElement('button');
+        btnFolder.type = 'button';
+        btnFolder.className = 'hist-btn';
+        btnFolder.textContent = '📂';
+        btnFolder.title = 'Abrir en el Explorador de Windows';
+        btnFolder.addEventListener('click', (e) => {
+          e.stopPropagation();
+          api('/api/reveal', { uid: it.historyUid, fileId: it.fileId });
+        });
+
+        card.append(rankBadge, typeBadge, meta, btnFolder);
+        collageCardsList.appendChild(card);
+      });
+    }
+
     if (item) {
       scTypeBadge.textContent = item.type === 'video' ? 'VID' : 'IMG';
       scTypeBadge.classList.toggle('video', item.type === 'video');
@@ -579,11 +769,23 @@
       }
     }
 
+    const isCollage = targetScreen?.displayMode === 'collage';
+    const activeCollageItems = Array.isArray(targetScreen?.activeItems) ? targetScreen.activeItems : [];
+    const collageRankMap = new Map();
+    if (isCollage) {
+      const rev = [...activeCollageItems].reverse();
+      rev.forEach((it, idx) => {
+        if (it.historyUid) collageRankMap.set(it.historyUid, idx);
+        if (it.fileId) collageRankMap.set(it.fileId, idx);
+      });
+    }
+
     const currentUid = targetScreen?.currentItem?.historyUid || (targetScreen?.replaying ? targetScreen.replayCurrentUid : null);
     const toReveal = [];
 
     newestFirst.forEach((entry, posIdx) => {
-      const isCurrent = entry.uid === currentUid;
+      const collageRank = isCollage ? (collageRankMap.get(entry.uid) ?? (entry.fileId ? collageRankMap.get(entry.fileId) : null) ?? null) : null;
+      const isCurrent = isCollage ? (collageRank !== null) : (entry.uid === currentUid);
 
       let row = existingRows.get(entry.uid);
       const isNewRow = !row;
@@ -640,6 +842,22 @@
         });
 
         row.append(thumbWrap, name, btnFolder);
+      }
+
+      const thumbWrap = row.querySelector('.hist-thumb-wrap');
+      if (thumbWrap) {
+        let rankEl = thumbWrap.querySelector('.hist-rank-badge');
+        if (collageRank !== null) {
+          if (!rankEl) {
+            rankEl = document.createElement('span');
+            rankEl.className = 'hist-rank-badge';
+            thumbWrap.appendChild(rankEl);
+          }
+          rankEl.className = 'hist-rank-badge' + (collageRank === 0 ? ' newest' : '');
+          rankEl.textContent = collageRank === 0 ? '★ Reciente' : `#${collageRank + 1}`;
+        } else if (rankEl) {
+          rankEl.remove();
+        }
       }
 
       row.classList.toggle('is-current', isCurrent);
@@ -744,6 +962,29 @@
       const id = getSelectedScreenId();
       api('/api/screen', { screenId: id, filter: fbtn.dataset.filter });
     });
+  }
+
+  if (btnDispSingle) {
+    btnDispSingle.addEventListener('click', () => {
+      const id = getSelectedScreenId();
+      api('/api/screen', { screenId: id, displayMode: 'single' });
+    });
+  }
+
+  if (btnDispCollage) {
+    btnDispCollage.addEventListener('click', () => {
+      const id = getSelectedScreenId();
+      api('/api/screen', { screenId: id, displayMode: 'collage' });
+    });
+  }
+
+  if (collageCountSeg) {
+    for (const cbtn of collageCountSeg.querySelectorAll('[data-count]')) {
+      cbtn.addEventListener('click', () => {
+        const id = getSelectedScreenId();
+        api('/api/screen', { screenId: id, collageCount: Number(cbtn.dataset.count) });
+      });
+    }
   }
 
   function connectSSE() {
